@@ -2,14 +2,6 @@
 
 import cv2
 import numpy as np
-
-
-
-def diffFrames(f0,f1,f2):
-    diff1 = cv2.absdiff(f2, f1)
-    diff2 = cv2.absdiff(f1,f0)
-    return cv2.bitwise_and(diff1, diff2)
-    
     
 class Camera:
     
@@ -22,28 +14,57 @@ class Camera:
         videoFrame = self.capture.read()[1]
         videoFrameSize = videoFrame.shape
         
-        blank_image = np.zeros(videoFrameSize, np.uint8)
+        # Capture cam image
+        _,colourImage = self.capture.read()
+        #blur image to remove false positives
+        colourImage = cv2.GaussianBlur(colourImage, (5,5), 0)
+        
+        #create moving average image with depth 32
+        movingAverageImage = np.float32(colourImage)
+        #create grey image with depth 8
+        greyImage = np.zeros(videoFrameSize, np.uint8)
+        
+        differenceImage = colourImage
+        tempImage = colourImage
         
         
-        
-        gFrameMinus = cv2.cvtColor(self.capture.read()[1], cv2.COLOR_RGB2GRAY)
-        gFrame = cv2.cvtColor(self.capture.read()[1], cv2.COLOR_RGB2GRAY)
-        gFramePlus = cv2.cvtColor(self.capture.read()[1], cv2.COLOR_RGB2GRAY)
-        
-
         while True:
             
-            #cv2.imshow("Camera", diffFrames(gFrameMinus, gFrame, gFramePlus))
+            _,colourImage = self.capture.read()
             
-            cv2.imshow("Camera1",blank_image)
-            #cv2.imshow("Camera2",gFramePlus)
+            # smooth colour image to get rid of false negatives 
+            colourImage = cv2.GaussianBlur(colourImage, (5,5), 0)
             
-            gFrameMinus = gFrame
-            gFrame = gFramePlus
-            gFramePlus = cv2.cvtColor(self.capture.read()[1], cv2.COLOR_RGB2GRAY)
+            cv2.accumulateWeighted(colourImage, movingAverageImage, 0.02)
+            
+            tempImage = cv2.convertScaleAbs(movingAverageImage)
+            
+            differenceImage = cv2.absdiff(colourImage, tempImage)
+            
+            #convert differenceImage to gray scale
+            greyImage = cv2.cvtColor(differenceImage, cv2.COLOR_RGB2GRAY)
+            
+            #convert grayImage to binary black and white
+            cv2.threshold(greyImage, 70, 255, cv2.THRESH_BINARY,greyImage)
             
             
-        
+            cv2.dilate(greyImage, None, greyImage, None, 18)
+            cv2.erode(greyImage, None, greyImage, None, 10)
+            
+            contour,_ = cv2.findContours(greyImage, cv2.cv.CV_RETR_CCOMP, cv2.cv.CV_CHAIN_APPROX_SIMPLE)
+            
+            
+            while contour:
+                areas = [cv2.contourArea(c) for c in contour]
+                max_index = np.argmax(areas)
+                cnt=contour[max_index]
+                x,y,w,h = cv2.boundingRect(cnt)
+                contour.pop()
+                cv2.rectangle(colourImage,(x,y),(x+w,y+h),(0,255,0),2)
+
+            
+            cv2.imshow("Camera1",colourImage)
+
             # Listen for ESC key
             c = cv2.waitKey(7) % 0x100
             if c == 27:
